@@ -1,0 +1,461 @@
+---
+output: html_document
+---
+# Placing Greek Gods in Space and Time
+
+## Introduction
+
+This R Markdown file uses a collection of Greek inscriptions to explore the repressentation of different Gods and Godesses in the ancient greek speaking world.
+
+The GIST dataset stands for Greek Inscriptions in Space and Time. It was created by the Social Dynamics in the Ancient Mediterranean Project and is mainly based on Greek inscriptions from the dataset of Searchable Greek Inscriptions and I.PHI dataset published by the Pythia Project.It contains 214,863 inscriptions enriched by 36 attributes.
+
+## Setup
+
+Here we load relevant packages and import our data.
+
+```{r setup}
+library(tidyverse)
+library(here)
+library(sf)
+library(geodata)
+#dir.create("data")
+#dir.create("figures")
+#dir.create("tables")
+gist <- read_sf("data/GIST_v1-1.geojson")
+```
+
+
+## Creating the GODS
+
+I thought it would be fun to name the dataset Gods of Olympus Data Set, so it could be abbreviated to GODS.
+
+Here we are creating the a data set containing all the inscriptions that mention gods. We are using the lemmata attribute, which contains a list of the individual words in the inscription in their standard lematized words. This means we dont have to worry about different grammatical inflections of the same words. To start, we a creating a vector of the different god names written in greek characters.
+
+```{r greek god names}
+
+greek_god_names <- c("Ἀφροδίτη", "Ἄρης", "Ἄρτεμις", "Ἀθηνᾶ", "Ἀθήνη", "Δημήτηρ", "Διόνυσος", "Ἥφαιστος", "Ἥρα", "Ἑρμῆς", "Ποσειδῶν", "Ἀπόλλων", "Ζεύς")
+
+```
+
+Using the filter and grepl functions we can select all the inscriptions containing god names in the lemmata. Then, using the mutate function, we are creating a new collumn, containing a copy of the lemmata. Using unnest, we get a new row for every individual word contained in each inscription. We can now filter the new collumn with the list of greek god names, so the god_names_in_greek collumn now contains the gods names in greek.
+
+```{r creating the GODS}
+
+gods <- gist %>% 
+  filter(grepl(paste(greek_god_names, collapse="|"), lemmata)) %>% 
+  mutate(god_name_in_greek = lemmata) %>% 
+  unnest(god_name_in_greek) %>% 
+  filter(grepl(paste(greek_god_names, collapse="|"), god_name_in_greek))
+
+```
+
+To make the dataset easier to work with, we can make a new attribute for the god names in english.
+
+```{r checking the list of greek god names}
+
+unique(gods$god_name_in_greek)
+
+```
+
+Now we can make a dictionary containing each name in ancient greek and then in its modern english version.
+
+```{r god names in english dictionary}
+
+english_god_names <- c("Ἀπόλλων" = "Apollo",
+                       "Ἀπόλλωνος" = "Apollo",
+                       "Ἀπόλλωνι" = "Apollo",
+                       "Ποσειδῶν" = "Poseidon",
+                       "Ἑρμῆς" = "Hermes",
+                       "Ἀφροδίτη" = "Aphrodite",
+                       "Ἄρης" = "Ares",
+                       "Ἄρτεμις" = "Artemis",
+                       "Ἀθήνη" = "Athena",
+                       "Δημήτηρ" = "Demeter",
+                       "Διόνυσος" = "Dionysus",
+                       "Ἥφαιστος" = "Hephaestus",
+                       "Ἥρα" = "Hera",
+                       "Ζεύς" = "Zeus")
+
+```
+
+Now we can use this dictionary to make a new attribute.
+
+```{r god names in latin characters}
+
+gods$god_name_in_english <- english_god_names[gods$god_name_in_greek]
+
+```
+
+And running the following chunk we can see a list of the the gods in our dataset
+
+```{r checking the list of god names}
+
+unique(gods$god_name_in_english)
+
+```
+Many inscriptions mention the same god several times. We want to avoid the issue by getting rid of duplicates, while preserving references to distinct gods in the same inscription.
+
+```{r removing duplicates}
+
+gods <- gods %>% 
+  group_by(PHI_ID) %>% 
+  distinct(god_name_in_english, .keep_all = TRUE) %>% 
+  ungroup()
+
+```
+
+## Inspecting the GODS
+
+Lets start by checking how many values are in our dataset.
+
+```{r counting the GODS}
+
+gods %>% 
+  count()
+
+```
+
+And then checking how many of those values have valid geospatial data.
+
+```{r counting valid spatial data}
+
+gods %>% 
+  filter(!is.na(Latitude)) %>% 
+  filter(!is.na(Longitude)) %>% 
+  count()
+
+```
+
+## Subsetting for Historical periods
+
+We are going to create a subset of the GODS, using only data from specific historical periods. This is the main dataset used for the visualisations.
+
+First we are going to subset new dataframes for the archaic, classical, and hellenistic perdiods by filtering the not_before and not_after attributes. Then we will use mutate to create a new attribute named period. Using rbind we can merge the new dataframes into a dataframe named gods_period, which now included the period attribute.
+
+```{r subsetting data frames for historical periods}
+gods_archaic_period <- gods %>% 
+  filter(not_before < -481) %>% 
+  filter(not_before > -801) %>% 
+  filter(not_after < -481) %>% 
+  filter(not_after > -801) %>% 
+  mutate(period = "archaic")
+
+gods_classical_period <- gods %>% 
+  filter(not_before < -324) %>% 
+  filter(not_before > -481) %>% 
+  filter(not_after < -324) %>% 
+  filter(not_after > -481) %>% 
+  mutate(period = "classical")
+
+gods_hellenistic_period <- gods %>% 
+  filter(not_before < -31) %>% 
+  filter(not_before > -324) %>% 
+  filter(not_after < -31) %>% 
+  filter(not_after > -324) %>% 
+  mutate(period = "hellenistic")
+
+gods_period <- rbind(gods_archaic_period, gods_classical_period,gods_hellenistic_period)
+
+```
+Lets count the number of values on the new dataset.
+
+```{r counting gods_period}
+
+gods_period %>% 
+  count()
+
+```
+
+And then checking how many of those values have valid geospatial data.
+
+```{r counting valid spatial data in gods_period}
+
+gods_period %>% 
+  filter(!is.na(Latitude)) %>% 
+  filter(!is.na(Longitude)) %>% 
+  count()
+
+```
+
+We can also count the total number of values and values with valid spatial data for each individual time period with using the chunks bellow.
+
+```{r counting data in the archaic period}
+gods_period %>% 
+  filter(period == "archaic") %>% 
+  count()
+```
+
+```{r counting valid spatial data in the archaic period}
+gods_period %>% 
+  filter(period == "archaic") %>% 
+  filter(!is.na(Latitude)) %>% 
+  filter(!is.na(Longitude)) %>% 
+  count()
+```
+
+```{r counting data in the classical period}
+gods_period %>% 
+  filter(period == "classical") %>% 
+  count()
+```
+
+```{r counting valid spatial data in the classical period}
+gods_period %>% 
+  filter(period == "classical") %>% 
+  filter(!is.na(Latitude)) %>% 
+  filter(!is.na(Longitude)) %>% 
+  count()
+```
+
+```{r counting data in the hellenistic period}
+gods_period %>% 
+  filter(period == "hellenistic") %>% 
+  count()
+```
+
+```{r counting valid spatial data in the hellenistic period}
+gods_period %>% 
+  filter(period == "hellenistic") %>% 
+  filter(!is.na(Latitude)) %>% 
+  filter(!is.na(Longitude)) %>% 
+  count()
+```
+
+## Preparing Map Elements
+
+Firstly we need to define our spacial limits by finding the maximum and minimum values of Latitude and Longitude in the map.
+
+```{r limits}
+
+min(gods$Latitude, na.rm = NA)
+max(gods$Latitude, na.rm = NA)
+min(gods$Longitude, na.rm = NA)
+max(gods$Longitude, na.rm = NA)
+
+```
+
+
+Secondly we need to make some maps to plot our data onto. We start by loading a world map from the geodata package and and setting it to a standard crs. Then we are cropping it into the region we are working with for our data.
+
+```{r loading a world map}
+
+world <- world(resolution = 2, level = 0, path = tempdir()) %>% 
+  st_as_sf(crs = 4326)
+
+sf_use_s2(F)
+
+world <- st_crop(world, xmin = -6, ymin = 14, xmax = 73, ymax = 55) %>% 
+  st_union %>% 
+  st_sf()
+
+
+```
+The data folder contains a map of the roman provinces, also from the SDAM project,which we are also going to read and then set to a standard crs.
+
+```{r setting crs for the roman province map}
+
+map <- read_sf("data/provinces_valid.geojson")
+map <- st_transform(map, crs=4326)
+
+```
+
+## Making Maps
+
+Lets start by making maps with our dataset. Here we make a map showing each inscription as a point, using different colours for each god.
+
+```{r plotting a map}
+
+ggplot() +
+  geom_sf(data = world) +
+  geom_sf(data = map) +
+  geom_sf(data = gods_period, aes(color = gods_period$god_name_in_english), size = 1) +
+  coord_sf(xlim = c(-6,73), ylim = c(14,55)) +
+  labs(color = "Olympian")
+
+```
+
+
+
+This map has a lot of overlap and is hard to read. Instead we can use the facet_wrap function in ggplot2 to make individual maps for each god. We can also lower the opacity of each point by setting the alpha = 0.1, and making the points smaller by setting the size = 0.8, making it easier to see how much overlap there is. I am also using theme_bw to make the map look a little nicer.
+
+```{r making a map with facet_wrap}
+
+ggplot() +
+  geom_sf(data = world)+
+  geom_sf(data = map)+
+  geom_sf(data = gods_period, aes(color = gods_period$god_name_in_english), alpha = 0.1, size = 0.8) +
+  coord_sf(xlim = c(-6,73), ylim = c(14,55)) +
+  labs(color = "Olympian") +
+  theme_bw()+
+  facet_wrap(~ god_name_in_english, nrow = 2)
+
+```
+
+## Mapping Historical Periods
+
+Now we can use the historical periods to create maps that combine spatial and temporal data.
+
+```{r archaic map}
+archaic_map <- ggplot() +
+  geom_sf(data = world) +
+  geom_sf(data = map) +
+  geom_sf(data = gods_archaic_period, aes(color = gods_archaic_period$god_name_in_english), alpha = 0.1, size = 0.8) +
+  coord_sf(xlim = c(-6,73), ylim = c(14,55)) +
+  labs(color = "God") +
+  theme_bw()+
+  facet_wrap(~ god_name_in_english, nrow = 2)
+
+archaic_map
+
+ggsave("figures/archaic_map.tiff", archaic_map)
+
+```
+
+
+```{r classical map}
+
+classical_map <- ggplot() +
+  geom_sf(data = world)+
+  geom_sf(data = map) +
+  geom_sf(data = gods_classical_period, aes(color = gods_classical_period$god_name_in_english), alpha = 0.1, size = 0.8) +
+  coord_sf(xlim = c(-6,73), ylim = c(14,55)) +
+  labs(color = "Olympian") +
+  theme_bw()+
+  facet_wrap(~ god_name_in_english, nrow = 2)
+
+classical_map
+
+ggsave("figures/classical_map.tiff", classical_map)
+
+```
+
+
+```{r hellenistic map}
+hellenistic_map <- ggplot() +
+  geom_sf(data = world)+
+  geom_sf(data = map) +
+  geom_sf(data = gods_hellenistic_period, aes(color = gods_hellenistic_period$god_name_in_english), alpha = 0.1, size = 0.8) +
+  coord_sf(xlim = c(-6,73), ylim = c(14,55)) +
+  labs(color = "Olympian") +
+  theme_bw()+
+  facet_wrap(~ god_name_in_english, nrow = 2)
+
+hellenistic_map
+
+ggsave("figures/hellenistic_map.tiff", hellenistic_map)
+
+```
+
+We can also use facet_grid to make a map comparing all the historical periods to each other.
+
+```{r facet_grid map}
+ggplot() +
+  geom_sf(data = world)+
+  geom_sf(data = map) +
+  geom_sf(data = gods_period, aes(color = gods_period$god_name_in_english), alpha = 0.3, size = 0.5) +
+  coord_sf(xlim = c(-6,73), ylim = c(14,55)) +
+  labs(title = "References to Gods in Greek Inscriptions in Historical Periods",
+       color = "God") +
+  theme_bw()+
+  facet_grid(rows = vars(period), cols = vars(god_name_in_english))
+```
+
+## Investigating Greek Cities
+
+Lets see how many Greek cities have references to the Olympians in different historical periods.
+
+```{r cities archaic period}
+
+cities_archaic <- gods_period %>% 
+  filter(period == "archaic") %>% 
+  filter(!is.na(polis_context_name))
+
+cities_archaic <- unique(cities_archaic$polis_context_name)
+
+length(cities_archaic)
+```
+
+```{r cities classical period}
+
+cities_classical <- gods_period %>% 
+  filter(period == "classical") %>% 
+  filter(!is.na(polis_context_name))
+
+cities_classical <- unique(cities_classical$polis_context_name)
+
+length(cities_classical)
+```
+
+```{r cities hellenistic period}
+
+cities_hellenistic <- gods_period %>% 
+  filter(period == "hellenistic") %>% 
+  filter(!is.na(polis_context_name))
+
+cities_hellenistic <- unique(cities_hellenistic$polis_context_name)
+
+length(cities_hellenistic)
+```
+
+We can also look into how many references to each god there are in each city.
+
+```{r city stats}
+
+city_stats <- gods_period %>% 
+  filter(!is.na(polis_context_name)) %>% 
+  count(god_name_in_english, polis_context_name, sort = TRUE) %>% 
+  arrange(god_name_in_english)
+
+```
+
+Running the following chunk, we see the 5 cities with the most inscriptions referencing each Olympian. Then we can also save it as a csv to use in our report.
+
+```{r top 5 cities}
+
+city_stats_top_5 <- city_stats %>% 
+  group_by(god_name_in_english) %>% 
+  top_n(5, n) %>% 
+  ungroup()
+
+write.csv(city_stats_top_5,"tables/city_stats_top_5.csv", row.names = FALSE)
+
+```
+
+## General Statistics and Tools
+
+Here are a couple of statistics that are not directly references in the report but are helpful in analysis 
+
+First, I made a bar plot to look into the representation of different Olympians in the different time periods. This way I could check how the number of inscriptions in one city compared to the total number of inscriptions.
+
+```{r representation of gods in historical periods}
+
+ggplot(data = gods_period, aes(x = period, fill = period)) +
+  geom_bar()+
+  geom_text(stat = "count", aes(label = after_stat(count)))+
+  labs(title = "Representation of Gods in Historical Periods",
+       fill = "Urban Context")+
+  facet_wrap(~ god_name_in_english)
+
+```
+
+I then made a list of the number of inscriptions referencing Olympians in each city, so I could reference which cities had many inscriptions and which were less common.
+
+```{r cities count}
+cities_count <- gods_period %>% 
+  count(polis_context_name, sort = TRUE)
+```
+I also created an index of all the distinct cities in the dataset arranged in alphabetical order, along with their size, region, and number of inscriptions.
+
+```{r city index}
+
+city_index <- gods_period %>% 
+  select(polis_context_name, polis_context_size, TMgeo_name) %>% 
+  group_by(polis_context_name) %>% 
+  distinct(polis_context_name, .keep_all = TRUE) %>% 
+  ungroup() %>% 
+  arrange(polis_context_name)
+
+city_index <- st_join(city_index, cities_count, by = "polis_context_name")
+
+```
+
